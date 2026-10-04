@@ -1,111 +1,309 @@
+@font-face {
+  font-family: 'PixelFont';
+  src: url('./assets/fonts/Silkscreen-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'PixelFont';
+  src: url('./assets/fonts/Silkscreen-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
-
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  --bg: #22252c;
+  --card-bg: #1a1c23;
+  --card-border: #000000;
+  --card-shadow: inset 1px 1px 0px 0px #333846;
+  --text: #cbd5e1;
+  --text-light: #f8fafc;
+  --text-muted: #94a3b8;
+  --purple: #b8a9f8;
+  --purple-dark: #8b75df;
+  --purple-light: #ded6ff;
+  --purple-text: #1b143f;
+  --blue: #9ec5fe;
+  --blue-dark: #6ea8fe;
+  --blue-light: #d0e2ff;
+  --blue-text: #0b2545;
+  --green: #a7f3d0;
+  --green-dark: #6ee7b7;
+  --green-light: #d1fae5;
+  --green-text: #064e3b;
+  --red: #fca5a5;
+  --red-dark: #f87171;
+  --red-light: #fecaca;
+  --red-text: #450a0a;
+  --cyan: #67e8f9;
+  --cyan-dark: #22d3ee;
+  --cyan-light: #a5f3fc;
+  --cyan-text: #083344;
+  --gray: #cbd5e1;
+  --gray-dark: #94a3b8;
+  --gray-light: #f1f5f9;
+  --gray-text: #1e293b;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+* {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
+  font-family: 'PixelFont', monospace;
+  background-color: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+button {
+  font-family: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: 2px solid #000000;
+  border-radius: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+}
+
+button:disabled {
+  background-color: #3e4451;
+  color: #6b7280;
+  cursor: not-allowed;
+  box-shadow:
+    inset -2px -2px 0px 0px #2c313a,
+    inset 2px 2px 0px 0px #525a6b,
+    2px 2px 0px 0px #000000;
+  transform: none;
+}
+
+.agBtnPurple {
+  background-color: var(--purple);
+  color: var(--purple-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--purple-dark),
+    inset 2px 2px 0px 0px var(--purple-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnPurple:hover:not(:disabled) {
+  background-color: #c5b9ff;
+}
+
+.agBtnPurple:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--purple-dark),
+    inset 2px 2px 0px 0px var(--purple-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agBtnBlue {
+  background-color: var(--blue);
+  color: var(--blue-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--blue-dark),
+    inset 2px 2px 0px 0px var(--blue-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnBlue:hover:not(:disabled) {
+  background-color: #b0d2fe;
+}
+
+.agBtnBlue:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--blue-dark),
+    inset 2px 2px 0px 0px var(--blue-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agBtnGreen {
+  background-color: var(--green);
+  color: var(--green-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--green-dark),
+    inset 2px 2px 0px 0px var(--green-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnGreen:hover:not(:disabled) {
+  background-color: #bbf7d0;
+}
+
+.agBtnGreen:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--green-dark),
+    inset 2px 2px 0px 0px var(--green-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agBtnRed {
+  background-color: var(--red);
+  color: var(--red-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--red-dark),
+    inset 2px 2px 0px 0px var(--red-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnRed:hover:not(:disabled) {
+  background-color: #fca5a5;
+}
+
+.agBtnRed:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--red-dark),
+    inset 2px 2px 0px 0px var(--red-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agBtnCyan {
+  background-color: var(--cyan);
+  color: var(--cyan-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--cyan-dark),
+    inset 2px 2px 0px 0px var(--cyan-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnCyan:hover:not(:disabled) {
+  background-color: #a5f3fc;
+}
+
+.agBtnCyan:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--cyan-dark),
+    inset 2px 2px 0px 0px var(--cyan-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agBtnGray {
+  background-color: var(--gray);
+  color: var(--gray-text);
+  box-shadow:
+    inset -2px -2px 0px 0px var(--gray-dark),
+    inset 2px 2px 0px 0px var(--gray-light),
+    3px 3px 0px 0px #000000;
+}
+
+.agBtnGray:hover:not(:disabled) {
+  background-color: #e2e8f0;
+}
+
+.agBtnGray:active:not(:disabled) {
+  box-shadow:
+    inset -2px -2px 0px 0px var(--gray-dark),
+    inset 2px 2px 0px 0px var(--gray-light),
+    1px 1px 0px 0px #000000;
+}
+
+.agInput {
+  background-color: #1a1c23;
+  border: 2px solid #000000;
+  color: #f8fafc;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 8px 10px;
+  box-shadow: inset 1px 1px 0px 0px #333846;
+  outline: none;
+}
+
+.agInput:focus {
+  border-color: var(--blue-dark);
+}
+
+.agSelect {
+  background-color: #1a1c23;
+  border: 2px solid #000000;
+  color: #f8fafc;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 8px 10px;
+  box-shadow: inset 1px 1px 0px 0px #333846;
+  outline: none;
+  cursor: pointer;
+}
+
+.agCard {
+  background-color: var(--card-bg);
+  border: 2px solid var(--card-border);
+  box-shadow: var(--card-shadow), 3px 3px 0px 0px #000000;
+  padding: 12px;
+}
+
+.agBadge {
+  font-size: 9px;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border: 1px solid #000000;
+  letter-spacing: 0.5px;
+  display: inline-block;
+}
+
+.agBadgePurple {
+  background-color: var(--purple);
+  color: var(--purple-text);
+}
+
+.agBadgeBlue {
+  background-color: var(--blue);
+  color: var(--blue-text);
+}
+
+.agBadgeGreen {
+  background-color: var(--green);
+  color: var(--green-text);
+}
+
+.agBadgeRed {
+  background-color: var(--red);
+  color: var(--red-text);
+}
+
+.agModalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.agModal {
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  background-color: var(--bg);
+  border: 3px solid #000000;
+  box-shadow: 6px 6px 0px 0px #000000;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }

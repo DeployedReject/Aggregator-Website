@@ -1,122 +1,222 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useState, useEffect } from 'react';
+import type { SourcePlugin, MediaItem, EpisodeItem } from './types/plugin';
+import type { LibraryItem, DownloadItem } from './types/library';
+import { loadPlugins, getPluginById } from './services/pluginRegistry';
+import {
+  loadLibrary,
+  addToLibrary,
+  removeFromLibrary,
+  updateWatchProgress,
+  loadCategories,
+  addCategory,
+  loadActiveSourceId,
+  saveActiveSourceId,
+} from './services/storageService';
+import {
+  subscribeDownloads,
+  downloadEpisode,
+  clearDownloads,
+} from './services/downloadService';
+import { Navbar } from './components/Navbar';
+import { BrowseView } from './components/BrowseView';
+import { LibraryView } from './components/LibraryView';
+import { DownloadsView } from './components/DownloadsView';
+import { MediaModal } from './components/MediaModal';
+import { PlayerModal } from './components/PlayerModal';
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [plugins, setPlugins] = useState<SourcePlugin[]>([]);
+  const [activePluginId, setActivePluginId] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'browse' | 'library' | 'downloads'>('browse');
+  const [library, setLibrary] = useState<LibraryItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [selectedMediaState, setSelectedMediaState] = useState<{
+    media: MediaItem;
+    plugin: SourcePlugin;
+  } | null>(null);
+  const [playingState, setPlayingState] = useState<{
+    episode: EpisodeItem;
+    allEpisodes: EpisodeItem[];
+    plugin: SourcePlugin;
+  } | null>(null);
+
+  useEffect(() => {
+    async function init() {
+      const all = await loadPlugins();
+      setPlugins(all);
+
+      const savedSource = await loadActiveSourceId();
+      if (savedSource && (savedSource === 'all' || all.some((p) => p.id === savedSource))) {
+        setActivePluginId(savedSource);
+      } else {
+        setActivePluginId('all');
+      }
+
+      const [lib, cats] = await Promise.all([loadLibrary(), loadCategories()]);
+      setLibrary(lib);
+      setCategories(cats);
+
+      const ext = globalThis as unknown as {
+        browser?: { runtime?: { sendMessage(msg: unknown): Promise<unknown> } };
+        chrome?: { runtime?: { sendMessage(msg: unknown): Promise<unknown> } };
+      };
+      const extAPI = ext.browser || ext.chrome;
+      if (extAPI?.runtime?.sendMessage) {
+        extAPI.runtime.sendMessage({ action: 'SYNC_AD_RULES' }).catch(() => {});
+      }
+    }
+    init();
+
+    const unsub = subscribeDownloads((items) => setDownloads(items));
+    return () => unsub();
+  }, []);
+
+  async function handlePluginChange(id: string) {
+    setActivePluginId(id);
+    await saveActiveSourceId(id);
+  }
+
+  async function handleAddToLibrary(media: MediaItem, category: string, pluginId: string) {
+    const item: LibraryItem = {
+      media,
+      pluginId,
+      category,
+      addedAt: Date.now(),
+    };
+    await addToLibrary(item);
+    const updated = await loadLibrary();
+    setLibrary(updated);
+  }
+
+  async function handleRemoveFromLibrary(mediaId: string) {
+    await removeFromLibrary(mediaId);
+    const updated = await loadLibrary();
+    setLibrary(updated);
+  }
+
+  async function handleAddCategory(cat: string) {
+    const updatedCats = await addCategory(cat);
+    setCategories(updatedCats);
+  }
+
+  async function handleChangeCategory(mediaId: string, category: string) {
+    const item = library.find((entry) => entry.media.id === mediaId);
+    if (!item) return;
+    item.category = category;
+    await addToLibrary(item);
+    const updated = await loadLibrary();
+    setLibrary(updated);
+  }
+
+  async function handlePlayEpisode(ep: EpisodeItem, allEps: EpisodeItem[], plugin: SourcePlugin) {
+    setPlayingState({ episode: ep, allEpisodes: allEps, plugin });
+    if (selectedMediaState) {
+      await updateWatchProgress(selectedMediaState.media.id, ep.id, ep.number);
+      const updated = await loadLibrary();
+      setLibrary(updated);
+    }
+  }
+
+  async function handleDownloadEpisode(media: MediaItem, ep: EpisodeItem, plugin: SourcePlugin) {
+    try {
+      const streams = await plugin.getStreams(ep.id);
+      if (streams.length > 0) {
+        await downloadEpisode(media.title, ep.number, streams[0].url, plugin.id);
+      } else {
+        alert('Could not find download stream for this episode.');
+      }
+    } catch (err) {
+      alert(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
+
+  function handleOpenLibraryItem(libItem: LibraryItem) {
+    const plugin = getPluginById(libItem.pluginId) || plugins[0];
+    if (plugin) {
+      setSelectedMediaState({ media: libItem.media, plugin });
+    }
+  }
+
+  const selectedMediaLibraryItem = selectedMediaState
+    ? library.find((item) => item.media.id === selectedMediaState.media.id)
+    : undefined;
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Navbar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        plugins={plugins}
+        activePluginId={activePluginId}
+        onPluginChange={handlePluginChange}
+        downloadCount={downloads.filter((d) => d.status === 'downloading').length}
+      />
 
-      <div className="ticks"></div>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {activeTab === 'browse' && (
+          <BrowseView
+            plugins={plugins}
+            activePluginId={activePluginId}
+            library={library}
+            onSelectMedia={(media, plugin) => setSelectedMediaState({ media, plugin })}
+            onOpenLibraryItem={handleOpenLibraryItem}
+          />
+        )}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        {activeTab === 'library' && (
+          <LibraryView
+            library={library}
+            categories={categories}
+            onSelectMedia={(media) => {
+              const item = library.find((entry) => entry.media.id === media.id);
+              if (item) handleOpenLibraryItem(item);
+            }}
+            onRemoveMedia={handleRemoveFromLibrary}
+            onAddCategory={handleAddCategory}
+            onChangeCategory={handleChangeCategory}
+          />
+        )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {activeTab === 'downloads' && (
+          <DownloadsView
+            downloads={downloads}
+            onClearDownloads={clearDownloads}
+          />
+        )}
+      </main>
+
+      {selectedMediaState && (
+        <MediaModal
+          media={selectedMediaState.media}
+          plugin={selectedMediaState.plugin}
+          categories={categories}
+          libraryItem={selectedMediaLibraryItem}
+          onClose={() => setSelectedMediaState(null)}
+          onAddToLibrary={(media, category) =>
+            handleAddToLibrary(media, category, selectedMediaState.plugin.id)
+          }
+          onRemoveFromLibrary={handleRemoveFromLibrary}
+          onPlayEpisode={(ep, all) =>
+            handlePlayEpisode(ep, all, selectedMediaState.plugin)
+          }
+          onDownloadEpisode={(media, ep) =>
+            handleDownloadEpisode(media, ep, selectedMediaState.plugin)
+          }
+        />
+      )}
+
+      {playingState && (
+        <PlayerModal
+          episode={playingState.episode}
+          allEpisodes={playingState.allEpisodes}
+          plugin={playingState.plugin}
+          onClose={() => setPlayingState(null)}
+          onSelectEpisode={(ep) =>
+            handlePlayEpisode(ep, playingState.allEpisodes, playingState.plugin)
+          }
+        />
+      )}
+    </div>
+  );
 }
-
-export default App

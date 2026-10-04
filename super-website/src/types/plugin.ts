@@ -15,6 +15,8 @@ export interface EpisodeItem {
 export interface StreamSource {
   quality: string;
   url: string;
+  subtitles?: { file: string; label: string }[];
+  type?: 'sub' | 'dub';
 }
 
 export interface SourcePlugin {
@@ -25,4 +27,5 @@ export interface SourcePlugin {
   search(query: string): Promise<MediaItem[]>;
   getEpisodes(mediaId: string): Promise<EpisodeItem[]>;
   getStreams(episodeId: string): Promise<StreamSource[]>;
+  getHome?(): Promise<MediaItem[]>;
 }

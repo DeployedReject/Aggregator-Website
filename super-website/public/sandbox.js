@@ -169,15 +169,13 @@ async function runPluginTestSuite(code, targetDomain) {
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
         const items = await Promise.race([homePromise, timeoutPromise]);
 
-        if (!Array.isArray(items)) {
-          throw new Error(`getHome() must return an Array, received: ${typeof items}`);
+        if (!Array.isArray(items) || items.length === 0) {
+          throw new Error(`getHome() must return a non-empty Array of media items, received: ${Array.isArray(items) ? "0 items" : typeof items}`);
         }
-        if (items.length > 0) {
-          for (let i = 0; i < Math.min(items.length, 5); i++) {
-            validateMediaItem(items[i], `getHome()[${i}]`);
-          }
-          sampleMediaItem = items[0];
+        for (let i = 0; i < Math.min(items.length, 5); i++) {
+          validateMediaItem(items[i], `getHome()[${i}]`);
         }
+        sampleMediaItem = items[0];
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 3/6: getHome() PASSED (${items.length} valid items returned).`);
       } catch (err) {
@@ -185,7 +183,7 @@ async function runPluginTestSuite(code, targetDomain) {
           test: "getHome()",
           error: err.message,
           stack: err.stack || err.message,
-          expected: "Array of items: [{ id: string, title: string (non-empty real title), coverUrl?: string, url?: string }]",
+          expected: "Non-empty Array of items: [{ id: string, title: string, coverUrl?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
         log("err", `\x1b[31m✗\x1b[0m Test 3/6 FAILED: ${err.message}`);
@@ -194,28 +192,26 @@ async function runPluginTestSuite(code, targetDomain) {
 
     if (plugin && typeof plugin.search === "function") {
       try {
-        log("sys", "Test 4/6: Executing search('a')...");
-        const searchPromise = plugin.search("a");
+        log("sys", "Test 4/6: Executing search('One Piece')...");
+        const searchPromise = plugin.search("One Piece");
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
         const results = await Promise.race([searchPromise, timeoutPromise]);
 
-        if (!Array.isArray(results)) {
-          throw new Error(`search() must return an Array, received: ${typeof results}`);
+        if (!Array.isArray(results) || results.length === 0) {
+          throw new Error(`search('One Piece') must return a non-empty Array of matching media items, received: ${Array.isArray(results) ? "0 items" : typeof results}`);
         }
-        if (results.length > 0) {
-          for (let i = 0; i < Math.min(results.length, 5); i++) {
-            validateMediaItem(results[i], `search()[${i}]`);
-          }
-          if (!sampleMediaItem) sampleMediaItem = results[0];
+        for (let i = 0; i < Math.min(results.length, 5); i++) {
+          validateMediaItem(results[i], `search()[${i}]`);
         }
+        if (!sampleMediaItem) sampleMediaItem = results[0];
         report.passedCount++;
-        log("resp", `\x1b[32m✓\x1b[0m Test 4/6: search() PASSED (${results.length} valid items returned).`);
+        log("resp", `\x1b[32m✓\x1b[0m Test 4/6: search('One Piece') PASSED (${results.length} valid items returned).`);
       } catch (err) {
         report.failedTests.push({
-          test: "search(query)",
+          test: "search('One Piece')",
           error: err.message,
           stack: err.stack || err.message,
-          expected: "Array of items: [{ id: string, title: string (non-empty real title), coverUrl?: string, url?: string }]",
+          expected: "Non-empty Array of items: [{ id: string, title: string, coverUrl?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
         log("err", `\x1b[31m✗\x1b[0m Test 4/6 FAILED: ${err.message}`);
@@ -230,29 +226,25 @@ async function runPluginTestSuite(code, targetDomain) {
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
         const episodes = await Promise.race([epPromise, timeoutPromise]);
 
-        if (!Array.isArray(episodes)) {
-          throw new Error(`getEpisodes() must return an Array, received: ${typeof episodes}`);
+        if (!Array.isArray(episodes) || episodes.length === 0) {
+          throw new Error(`getEpisodes("${mediaIdToTest}") must return a non-empty Array of episodes, received: ${Array.isArray(episodes) ? "0 episodes" : typeof episodes}`);
         }
-        if (episodes.length > 0) {
-          for (let i = 0; i < episodes.length; i++) {
-            const ep = episodes[i];
-            if (!ep || typeof ep !== "object") {
-              throw new Error(`getEpisodes() returned non-object episode at index ${i}`);
-            }
-            if (ep.id === undefined || ep.id === null || ep.id === "") {
-              throw new Error(`Episode at index ${i} missing required 'id' field. Episode: ${JSON.stringify(ep)}`);
-            }
-            if (typeof ep.number !== "number" || isNaN(ep.number)) {
-              throw new Error(`Episode at index ${i} has invalid 'number' (${JSON.stringify(ep.number)}). Must be an integer number (1, 2, ...).`);
-            }
-            if (ep.title && (typeof ep.title !== "string" || ep.title.includes("[object Object]"))) {
-              throw new Error(`Episode at index ${i} has invalid title string: ${JSON.stringify(ep.title)}`);
-            }
+        for (let i = 0; i < episodes.length; i++) {
+          const ep = episodes[i];
+          if (!ep || typeof ep !== "object") {
+            throw new Error(`getEpisodes() returned non-object episode at index ${i}`);
           }
-          sampleEpisodeItem = episodes[0];
-        } else {
-          throw new Error(`getEpisodes("${mediaIdToTest}") returned 0 episodes. Plugins must return available episodes for media items.`);
+          if (ep.id === undefined || ep.id === null || ep.id === "") {
+            throw new Error(`Episode at index ${i} missing required 'id' field. Episode: ${JSON.stringify(ep)}`);
+          }
+          if (typeof ep.number !== "number" || isNaN(ep.number)) {
+            throw new Error(`Episode at index ${i} has invalid 'number' (${JSON.stringify(ep.number)}). Must be an integer number (1, 2, ...).`);
+          }
+          if (ep.title && (typeof ep.title !== "string" || ep.title.includes("[object Object]"))) {
+            throw new Error(`Episode at index ${i} has invalid title string: ${JSON.stringify(ep.title)}`);
+          }
         }
+        sampleEpisodeItem = episodes[0];
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
       } catch (err) {
@@ -260,7 +252,7 @@ async function runPluginTestSuite(code, targetDomain) {
           test: "getEpisodes(mediaId)",
           error: err.message,
           stack: err.stack || err.message,
-          expected: "Array of episodes: [{ id: string, number: number, title?: string, url?: string }]",
+          expected: "Non-empty Array of episodes: [{ id: string, number: number, title?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
         log("err", `\x1b[31m✗\x1b[0m Test 5/6 FAILED: ${err.message}`);
@@ -275,8 +267,8 @@ async function runPluginTestSuite(code, targetDomain) {
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
         const streams = await Promise.race([streamPromise, timeoutPromise]);
 
-        if (!Array.isArray(streams)) {
-          throw new Error(`getStreams() must return an Array, received: ${typeof streams}`);
+        if (!Array.isArray(streams) || streams.length === 0) {
+          throw new Error(`getStreams("${episodeIdToTest}") must return a non-empty Array of stream sources, received: ${Array.isArray(streams) ? "0 streams" : typeof streams}`);
         }
         if (streams.length > 0) {
           for (let i = 0; i < streams.length; i++) {

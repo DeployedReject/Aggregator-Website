@@ -105,7 +105,7 @@ async function runPluginTestSuite(code, targetDomain) {
         throw new Error("Plugin script did not export an object via module.exports or export default.");
       }
       report.passedCount++;
-      log("sys", "Test 1/6: Syntax & Module Instantiation PASSED.");
+      log("resp", "\x1b[32m✓\x1b[0m Test 1/6: Syntax & Module Instantiation PASSED.");
     } catch (err) {
       report.failedTests.push({
         test: "Syntax & Module Instantiation",
@@ -114,7 +114,7 @@ async function runPluginTestSuite(code, targetDomain) {
         expected: "Plugin compiles and exports an object via module.exports or export default",
         actual: `Threw error: ${err.message}`,
       });
-      log("err", `Test 1/6 FAILED: ${err.message}`);
+      log("err", `\x1b[31m✗\x1b[0m Test 1/6 FAILED: ${err.message}`);
     }
 
     if (plugin) {
@@ -129,7 +129,7 @@ async function runPluginTestSuite(code, targetDomain) {
 
       if (missing.length === 0) {
         report.passedCount++;
-        log("sys", "Test 2/6: Schema & Interface Compliance PASSED.");
+        log("resp", "\x1b[32m✓\x1b[0m Test 2/6: Schema & Interface Compliance PASSED.");
       } else {
         report.failedTests.push({
           test: "Schema & Interface Compliance",
@@ -138,7 +138,7 @@ async function runPluginTestSuite(code, targetDomain) {
           expected: "id, name, baseUrl, search(), getHome(), getEpisodes(), getStreams()",
           actual: `Missing: ${missing.join(", ")}`,
         });
-        log("err", `Test 2/6 FAILED: Missing ${missing.join(", ")}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 2/6 FAILED: Missing ${missing.join(", ")}`);
       }
     }
 
@@ -179,7 +179,7 @@ async function runPluginTestSuite(code, targetDomain) {
           sampleMediaItem = items[0];
         }
         report.passedCount++;
-        log("resp", `Test 3/6: getHome() PASSED (${items.length} valid items returned).`);
+        log("resp", `\x1b[32m✓\x1b[0m Test 3/6: getHome() PASSED (${items.length} valid items returned).`);
       } catch (err) {
         report.failedTests.push({
           test: "getHome()",
@@ -188,7 +188,7 @@ async function runPluginTestSuite(code, targetDomain) {
           expected: "Array of items: [{ id: string, title: string (non-empty real title), coverUrl?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
-        log("err", `Test 3/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 3/6 FAILED: ${err.message}`);
       }
     }
 
@@ -209,7 +209,7 @@ async function runPluginTestSuite(code, targetDomain) {
           if (!sampleMediaItem) sampleMediaItem = results[0];
         }
         report.passedCount++;
-        log("resp", `Test 4/6: search() PASSED (${results.length} valid items returned).`);
+        log("resp", `\x1b[32m✓\x1b[0m Test 4/6: search() PASSED (${results.length} valid items returned).`);
       } catch (err) {
         report.failedTests.push({
           test: "search(query)",
@@ -218,7 +218,7 @@ async function runPluginTestSuite(code, targetDomain) {
           expected: "Array of items: [{ id: string, title: string (non-empty real title), coverUrl?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
-        log("err", `Test 4/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 4/6 FAILED: ${err.message}`);
       }
     }
 
@@ -254,7 +254,7 @@ async function runPluginTestSuite(code, targetDomain) {
           throw new Error(`getEpisodes("${mediaIdToTest}") returned 0 episodes. Plugins must return available episodes for media items.`);
         }
         report.passedCount++;
-        log("resp", `Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
+        log("resp", `\x1b[32m✓\x1b[0m Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
       } catch (err) {
         report.failedTests.push({
           test: "getEpisodes(mediaId)",
@@ -263,7 +263,7 @@ async function runPluginTestSuite(code, targetDomain) {
           expected: "Array of episodes: [{ id: string, number: number, title?: string, url?: string }]",
           actual: `Error: ${err.message}`,
         });
-        log("err", `Test 5/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 5/6 FAILED: ${err.message}`);
       }
     }
 
@@ -310,7 +310,7 @@ async function runPluginTestSuite(code, targetDomain) {
           }
         }
         report.passedCount++;
-        log("resp", `Test 6/6: getStreams() PASSED (${streams.length} stream sources returned).`);
+        log("resp", `\x1b[32m✓\x1b[0m Test 6/6: getStreams() PASSED (${streams.length} stream sources returned).`);
       } catch (err) {
         report.failedTests.push({
           test: "getStreams(episodeId)",
@@ -319,7 +319,7 @@ async function runPluginTestSuite(code, targetDomain) {
           expected: "Array of stream sources: [{ url: string, quality?: string, type?: 'sub'|'dub', subtitles?: [{ file, label }], headers?: { Referer, Origin } }]",
           actual: `Error: ${err.message}`,
         });
-        log("err", `Test 6/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 6/6 FAILED: ${err.message}`);
       }
     }
   } finally {

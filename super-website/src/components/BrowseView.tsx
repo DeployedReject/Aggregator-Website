@@ -154,7 +154,7 @@ export function BrowseView({
           style={{ width: '340px', maxWidth: '100%' }}
         />
         <button type="submit" className="agBtnBlue" disabled={isSearching}>
-          {isSearching ? 'SEARCHING...' : 'GLOBAL SEARCH'}
+          {isSearching ? 'SEARCHING...' : 'SEARCH'}
         </button>
         {hasSearched && (
           <button
@@ -170,7 +170,7 @@ export function BrowseView({
 
       {isSearching && (
         <div style={{ textAlign: 'center', padding: '40px 0', fontSize: '12px', color: 'var(--blue)' }}>
-          QUERYING SOURCES SIMULTANEOUSLY...
+          Searching all sources...
         </div>
       )}
 
@@ -280,7 +280,7 @@ export function BrowseView({
                 }}
               >
                 <span style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 'bold' }}>
-                  FEATURED FROM {group.plugin.name.toUpperCase()}
+                  {group.plugin.name}
                 </span>
                 <span className="agBadge agBadgeBlue">
                   {group.items.length} TITLES

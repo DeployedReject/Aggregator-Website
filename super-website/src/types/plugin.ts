@@ -16,6 +16,7 @@ export interface StreamSource {
   quality: string;
   url: string;
   subtitles?: { file: string; label: string }[];
+  headers?: Record<string, string>;
   type?: 'sub' | 'dub';
 }
 

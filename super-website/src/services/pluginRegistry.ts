@@ -335,6 +335,36 @@ export async function loadPlugins(): Promise<SourcePlugin[]> {
   let uninstalled = new Set<string>();
   let installed: Record<string, { id?: string; name?: string; code?: string }> = {};
 
+  // Check if Aggregator was launched in Trial Mode for testing a newly generated plugin
+  try {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const isTrial = params?.get('trial') === 'true' || params?.has('trialPluginId');
+    if (isTrial) {
+      let trialItem: { id?: string; name?: string; code?: string } | null = null;
+      if (browserAPI?.storage?.local) {
+        const tData = await browserAPI.storage.local.get('aggregator_trial_plugin');
+        if (tData?.aggregator_trial_plugin) {
+          trialItem = tData.aggregator_trial_plugin as { id?: string; name?: string; code?: string };
+        }
+      }
+      if (!trialItem) {
+        const raw = localStorage.getItem('aggregator_trial_plugin');
+        if (raw) {
+          try { trialItem = JSON.parse(raw); } catch (e) {}
+        }
+      }
+      if (trialItem && trialItem.code) {
+        pluginMap.clear();
+        const trialId = trialItem.id || params?.get('trialPluginId') || 'trial_plugin';
+        const p = await createPluginFromCode(trialId, trialItem.code);
+        if (p) {
+          pluginMap.set(p.id, p);
+          return [p];
+        }
+      }
+    }
+  } catch (e) {}
+
   if (browserAPI?.storage?.local) {
     try {
       const data = await browserAPI.storage.local.get([

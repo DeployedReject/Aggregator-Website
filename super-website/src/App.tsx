@@ -146,6 +146,11 @@ export default function App() {
     ? library.find((item) => item.media.id === selectedMediaState.media.id)
     : undefined;
 
+  const isTrial = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('trial') === 'true' ||
+    new URLSearchParams(window.location.search).has('trialPluginId')
+  );
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar
@@ -156,6 +161,29 @@ export default function App() {
         onPluginChange={handlePluginChange}
         downloadCount={downloads.filter((d) => d.status === 'downloading').length}
       />
+
+      {isTrial && (
+        <div
+          style={{
+            backgroundColor: '#1b143f',
+            borderBottom: '2px solid var(--purple)',
+            color: 'var(--purple)',
+            padding: '8px 16px',
+            fontSize: '11px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontWeight: 'bold',
+          }}
+        >
+          <span>
+            [TRIAL MODE: Isolated Test for {plugins[0]?.name || 'Newly Generated Plugin'}]
+          </span>
+          <span style={{ fontSize: '10px', color: 'var(--text-light)', fontWeight: 'normal' }}>
+            Test browsing, searching & playback here. Return to the Generator tab to Approve [✓] or Report Issues [✗].
+          </span>
+        </div>
+      )}
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'browse' && (

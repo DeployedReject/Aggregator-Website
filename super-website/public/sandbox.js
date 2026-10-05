@@ -70,6 +70,25 @@ const browserMock = {
 globalThis.browser = browserMock;
 globalThis.chrome = browserMock;
 
+function sanitizePluginExecutableCode(raw) {
+  if (!raw) return "";
+  let code = raw;
+  code = code.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  code = code.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+  code = code.replace(/<\/?(?:think|reasoning|scratchpad|output|code)>/gi, "");
+  code = code.replace(/<(?:\w+\s+)*(?:code|javascript|plugin|script|source)>/gi, "");
+  code = code.replace(/_{3,}/g, "");
+  code = code.replace(/^```[a-z]*\s*/gim, "").replace(/```\s*$/gim, "");
+  const match = code.match(/(?:export\s+default\s*\{|module\.exports\s*=|const\s+plugin\s*=|globalThis\.AggregatorPlugins)[\s\S]*/);
+  if (match) {
+    code = match[0];
+  }
+  return code
+    .replace(/\bexport\s+default\s+([a-zA-Z0-9_$]+)\s*;?/g, "module.exports = $1; module.exports.default = $1;")
+    .replace(/\bexport\s+default\s+/g, "module.exports.default = ")
+    .replace(/\bexport\s+(const|let|var|function|class)\s+/g, "$1 ");
+}
+
 async function runPluginTestSuite(code, targetDomain) {
   const report = {
     passed: false,
@@ -89,10 +108,7 @@ async function runPluginTestSuite(code, targetDomain) {
 
   try {
     try {
-      const executableCode = code
-        .replace(/\bexport\s+default\s+([a-zA-Z0-9_$]+)\s*;?/g, "module.exports = $1; module.exports.default = $1;")
-        .replace(/\bexport\s+default\s+/g, "module.exports.default = ")
-        .replace(/\bexport\s+(const|let|var|function|class)\s+/g, "$1 ");
+      const executableCode = sanitizePluginExecutableCode(code);
       const fn = new Function("module", "exports", executableCode);
       const mockModule = { exports: {} };
       fn(mockModule, mockModule.exports);
@@ -341,10 +357,7 @@ window.addEventListener("message", async (event) => {
   } else if (event.data.action === "REGISTER_PLUGIN") {
     const { pluginId, code } = event.data;
     try {
-      const executableCode = code
-        .replace(/\bexport\s+default\s+([a-zA-Z0-9_$]+)\s*;?/g, "module.exports = $1; module.exports.default = $1;")
-        .replace(/\bexport\s+default\s+/g, "module.exports.default = ")
-        .replace(/\bexport\s+(const|let|var|function|class)\s+/g, "$1 ");
+      const executableCode = sanitizePluginExecutableCode(code);
       const fn = new Function("module", "exports", executableCode);
       const mockModule = { exports: {} };
       fn(mockModule, mockModule.exports);

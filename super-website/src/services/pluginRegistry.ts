@@ -340,6 +340,7 @@ export async function loadPlugins(): Promise<SourcePlugin[]> {
     const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
     const isTrial = params?.get('trial') === 'true' || params?.has('trialPluginId');
     if (isTrial) {
+      pluginMap.clear();
       let trialItem: { id?: string; name?: string; code?: string } | null = null;
       if (browserAPI?.storage?.local) {
         const tData = await browserAPI.storage.local.get('aggregator_trial_plugin');
@@ -354,7 +355,6 @@ export async function loadPlugins(): Promise<SourcePlugin[]> {
         }
       }
       if (trialItem && trialItem.code) {
-        pluginMap.clear();
         const trialId = trialItem.id || params?.get('trialPluginId') || 'trial_plugin';
         const p = await createPluginFromCode(trialId, trialItem.code);
         if (p) {
@@ -362,6 +362,9 @@ export async function loadPlugins(): Promise<SourcePlugin[]> {
           return [p];
         }
       }
+      // In trial mode, strictly return only the trial plugin or empty array.
+      // Never fall through to loading other installed or default plugins!
+      return Array.from(pluginMap.values());
     }
   } catch (e) {}
 

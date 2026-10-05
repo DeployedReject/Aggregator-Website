@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { SourcePlugin, MediaItem, EpisodeItem } from './types/plugin';
 import type { LibraryItem, DownloadItem } from './types/library';
-import { loadPlugins, getPluginById } from './services/pluginRegistry';
+import { loadPlugins, getPluginById, subscribePluginChanges } from './services/pluginRegistry';
 import {
   loadLibrary,
   addToLibrary,
@@ -68,8 +68,12 @@ export default function App() {
     }
     init();
 
-    const unsub = subscribeDownloads((items) => setDownloads(items));
-    return () => unsub();
+    const unsubDownloads = subscribeDownloads((items) => setDownloads(items));
+    const unsubPlugins = subscribePluginChanges((updated) => setPlugins(updated));
+    return () => {
+      unsubDownloads();
+      unsubPlugins();
+    };
   }, []);
 
   async function handlePluginChange(id: string) {

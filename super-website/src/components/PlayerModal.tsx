@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+import { MediaPlayer, type MediaPlayerClass } from 'dashjs';
 import type { SourcePlugin, EpisodeItem, StreamSource } from '../types/plugin';
 
 type VideoJsPlayer = ReturnType<typeof videojs>;
@@ -11,6 +12,38 @@ interface Props {
   plugin: SourcePlugin | undefined;
   onClose: () => void;
   onSelectEpisode: (ep: EpisodeItem) => void;
+}
+
+interface CustomSubtitle {
+  label: string;
+  src: string;
+}
+
+function isDirectStream(s: StreamSource): boolean {
+  if (!s || !s.url) return false;
+  const u = s.url.toLowerCase();
+  const q = (s.quality || '').toLowerCase();
+  if (q.includes('(embed)') || q.includes('[player embed]')) return false;
+  if (u.includes('embed.php') || u.includes('/player/?') || u.includes('/embed/')) return false;
+  if (u.includes('.m3u8') || u.includes('.mpd') || u.includes('.mp4') || u.includes('.webm') || u.includes('aniwatchtv.site') || u.includes('animeonsen.xyz')) return true;
+  return false;
+}
+
+function cleanQualityLabel(raw: string): string {
+  if (!raw) return 'Auto';
+  const match = raw.match(/\b(\d{3,4}p)\b/i);
+  if (match) return match[1].toLowerCase();
+  if (/auto/i.test(raw)) return 'Auto';
+  if (/default/i.test(raw)) return 'Default';
+  return raw.replace(/\[.*?\]|\(.*?\)/g, '').trim() || 'Auto';
+}
+
+function convertSrtToVtt(srtText: string): string {
+  let vtt = 'WEBVTT\n\n';
+  vtt += srtText
+    .replace(/\r\n|\r/g, '\n')
+    .replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g, '$1.$2');
+  return vtt;
 }
 
 export function PlayerModal({
@@ -24,18 +57,22 @@ export function PlayerModal({
   const [activeStream, setActiveStream] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [proxyLoading, setProxyLoading] = useState(false);
   const [audioType, setAudioType] = useState<'sub' | 'dub'>('sub');
+  const [customSubtitles, setCustomSubtitles] = useState<CustomSubtitle[]>([]);
+  const [showSubModal, setShowSubModal] = useState(false);
+  const [subUrlInput, setSubUrlInput] = useState('');
+  const [subStatusMessage, setSubStatusMessage] = useState<string | null>(null);
 
   const videoNodeRef = useRef<HTMLVideoElement | null>(null);
   const playerRef = useRef<VideoJsPlayer | null>(null);
+  const dashPlayerRef = useRef<MediaPlayerClass | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentIndex = allEpisodes.findIndex((e) => e.id === episode.id);
   const prevEp = currentIndex > 0 ? allEpisodes[currentIndex - 1] : null;
   const nextEp = currentIndex >= 0 && currentIndex < allEpisodes.length - 1 ? allEpisodes[currentIndex + 1] : null;
 
-  async function handleBackgroundProxy() {
+  async function resolveViaBackground(): Promise<StreamSource | null> {
     type ExtensionRuntime = {
       runtime?: {
         sendMessage(msg: unknown): Promise<{ status?: string; url?: string }>;
@@ -43,32 +80,49 @@ export function PlayerModal({
     };
     const browserAPI = (globalThis as unknown as { browser?: ExtensionRuntime; chrome?: ExtensionRuntime }).browser ||
       (globalThis as unknown as { browser?: ExtensionRuntime; chrome?: ExtensionRuntime }).chrome;
-    if (!browserAPI?.runtime?.sendMessage) {
-      setError('Background extension API unavailable in this context.');
-      return;
-    }
-    setProxyLoading(true);
-    setError(null);
+    if (!browserAPI?.runtime?.sendMessage) return null;
     try {
       const res = await browserAPI.runtime.sendMessage({
         action: 'STREAM_BACKGROUND_TAB',
         url: episode.url,
       });
       if (res?.status === 'FOUND' && res.url) {
-        const bgStream: StreamSource = {
-          quality: `Proxy Stream (${audioType.toUpperCase()})`,
+        return {
+          quality: 'Auto',
           url: res.url,
           type: audioType,
         };
-        setStreams((prev) => [bgStream, ...prev]);
-        setActiveStream(res.url);
-      } else {
-        setError('Background proxy timed out or stream was not detected.');
       }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  async function handleRetry() {
+    setLoading(true);
+    setError(null);
+    try {
+      const bgStream = await resolveViaBackground();
+      if (bgStream) {
+        setStreams((prev) => [bgStream, ...prev]);
+        setActiveStream(bgStream.url);
+        return;
+      }
+      if (plugin) {
+        const data = await plugin.getStreams(episode.id);
+        const valid = data.filter(isDirectStream);
+        if (valid.length > 0) {
+          setStreams(valid);
+          setActiveStream(valid[0].url);
+          return;
+        }
+      }
+      setError('Unable to load video stream.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Background proxy request failed');
+      setError(err instanceof Error ? err.message : 'Stream request failed');
     } finally {
-      setProxyLoading(false);
+      setLoading(false);
     }
   }
 
@@ -80,11 +134,68 @@ export function PlayerModal({
     }
   }
 
+  function handleSubtitleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let content = (ev.target?.result as string) || '';
+      if (file.name.toLowerCase().endsWith('.srt') || (!content.startsWith('WEBVTT') && !content.includes('-->'))) {
+        content = convertSrtToVtt(content);
+      }
+      const blob = new Blob([content], { type: 'text/vtt' });
+      const blobUrl = URL.createObjectURL(blob);
+      const label = file.name.replace(/\.[^/.]+$/, '');
+      const newSub: CustomSubtitle = { label: `Uploaded: ${label}`, src: blobUrl };
+      setCustomSubtitles((prev) => [...prev, newSub]);
+      setSubStatusMessage(`Loaded: ${file.name}`);
+      setTimeout(() => {
+        setSubStatusMessage(null);
+        setShowSubModal(false);
+      }, 1200);
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function handleAddSubtitleUrl() {
+    if (!subUrlInput.trim()) return;
+    const url = subUrlInput.trim();
+    setSubStatusMessage('Fetching subtitle...');
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        let content = await res.text();
+        if (url.toLowerCase().endsWith('.srt') || !content.startsWith('WEBVTT')) {
+          content = convertSrtToVtt(content);
+        }
+        const blob = new Blob([content], { type: 'text/vtt' });
+        const blobUrl = URL.createObjectURL(blob);
+        const newSub: CustomSubtitle = { label: `URL: ${url.split('/').pop() || 'Subtitle'}`, src: blobUrl };
+        setCustomSubtitles((prev) => [...prev, newSub]);
+        setSubStatusMessage('Subtitle attached successfully!');
+      } else {
+        const newSub: CustomSubtitle = { label: `URL Subtitle`, src: url };
+        setCustomSubtitles((prev) => [...prev, newSub]);
+        setSubStatusMessage('Subtitle URL registered.');
+      }
+    } catch {
+      const newSub: CustomSubtitle = { label: `Custom Subtitle`, src: url };
+      setCustomSubtitles((prev) => [...prev, newSub]);
+      setSubStatusMessage('Subtitle linked directly.');
+    }
+    setSubUrlInput('');
+    setTimeout(() => {
+      setSubStatusMessage(null);
+      setShowSubModal(false);
+    }, 1200);
+  }
+
   useEffect(() => {
     let active = true;
     async function loadStreams() {
       if (!plugin) {
-        setError('Plugin unavailable');
+        setError('Source plugin unavailable');
         setLoading(false);
         return;
       }
@@ -92,16 +203,23 @@ export function PlayerModal({
         setLoading(true);
         setError(null);
         const data = await plugin.getStreams(episode.id);
+        const valid = data.filter(isDirectStream);
         if (active) {
-          setStreams(data);
-          if (data.length > 0) {
-            const hasSub = data.some((s) => s.type === 'sub');
-            const initialType = hasSub ? 'sub' : (data[0].type || 'sub');
+          if (valid.length > 0) {
+            setStreams(valid);
+            const hasSub = valid.some((s) => s.type === 'sub');
+            const initialType = hasSub ? 'sub' : (valid[0].type || 'sub');
             setAudioType(initialType);
-            const firstOfType = data.find((s) => s.type === initialType);
-            setActiveStream(firstOfType ? firstOfType.url : data[0].url);
+            const ofType = valid.filter((s) => s.type === initialType);
+            setActiveStream(ofType[0] ? ofType[0].url : valid[0].url);
           } else {
-            setError('No video streams found for this episode.');
+            const bgStream = await resolveViaBackground();
+            if (active && bgStream) {
+              setStreams([bgStream]);
+              setActiveStream(bgStream.url);
+            } else if (active) {
+              setError('No video streams found for this episode.');
+            }
           }
         }
       } catch (err) {
@@ -118,34 +236,51 @@ export function PlayerModal({
     };
   }, [episode.id, plugin]);
 
-  const isEmbed =
-    activeStream.includes('embed.php') ||
-    activeStream.includes('/player/?') ||
-    (activeStream.includes('megavid.buzz') && !activeStream.includes('aniwatchtv.site')) ||
-    (!activeStream.includes('.m3u8') && !activeStream.includes('.mp4') && !activeStream.includes('aniwatchtv.site'));
-
   useEffect(() => {
-    if (isEmbed) {
-      if (playerRef.current && !playerRef.current.isDisposed()) {
-        playerRef.current.dispose();
-        playerRef.current = null;
-      }
-      return;
-    }
-
     if (!videoNodeRef.current || !activeStream) return;
 
-    const streamType = (activeStream.includes('.m3u8') || activeStream.includes('aniwatchtv.site'))
-      ? 'application/x-mpegURL'
-      : 'video/mp4';
+    const isDash = activeStream.includes('.mpd') || activeStream.includes('animeonsen.xyz');
+    const isHls = activeStream.includes('.m3u8') || activeStream.includes('aniwatchtv.site');
+    const isWebm = activeStream.includes('.webm');
+    const streamType = isHls ? 'application/x-mpegURL' : isDash ? 'application/dash+xml' : isWebm ? 'video/webm' : 'video/mp4';
 
     const currentStreamObj = streams.find((s) => s.url === activeStream);
-    const subTracks = currentStreamObj?.subtitles?.map((st) => ({
-      kind: 'captions',
-      label: st.label,
-      src: st.file,
-      default: st.label.toLowerCase().includes('english'),
-    })) || [];
+
+    // Register headers with proxy gateway if available
+    if (currentStreamObj?.headers) {
+      type ExtensionRuntime = {
+        runtime?: {
+          sendMessage(msg: unknown): Promise<unknown>;
+        };
+      };
+      const browserAPI = (globalThis as unknown as { browser?: ExtensionRuntime; chrome?: ExtensionRuntime }).browser ||
+        (globalThis as unknown as { browser?: ExtensionRuntime; chrome?: ExtensionRuntime }).chrome;
+      if (browserAPI?.runtime?.sendMessage) {
+        browserAPI.runtime.sendMessage({
+          action: 'REGISTER_STREAM_HEADERS',
+          url: currentStreamObj.url,
+          headers: currentStreamObj.headers,
+        }).catch(() => {});
+      }
+    }
+
+    const streamSubTracks = (currentStreamObj?.subtitles || [])
+      .filter((st) => !st.file.endsWith('.wasm'))
+      .map((st) => ({
+        kind: 'captions' as const,
+        label: st.label || 'Sub',
+        src: st.file,
+        default: (st.label || '').toLowerCase().includes('english') || (st.label || '').toLowerCase().includes('eng'),
+      }));
+
+    const customTracks = customSubtitles.map((cs) => ({
+      kind: 'captions' as const,
+      label: cs.label,
+      src: cs.src,
+      default: true,
+    }));
+
+    const allSubTracks = [...streamSubTracks, ...customTracks];
 
     if (!playerRef.current) {
       playerRef.current = videojs(videoNodeRef.current, {
@@ -166,14 +301,21 @@ export function PlayerModal({
           pictureInPictureToggle: true,
           fullscreenToggle: true,
         },
-        tracks: subTracks,
-        sources: [
-          {
-            src: activeStream,
-            type: streamType,
-          },
-        ],
       });
+    }
+
+    if (dashPlayerRef.current) {
+      dashPlayerRef.current.reset();
+      dashPlayerRef.current.destroy();
+      dashPlayerRef.current = null;
+    }
+
+    if (isDash) {
+      const videoEl = videoNodeRef.current;
+      if (videoEl) {
+        dashPlayerRef.current = MediaPlayer().create();
+        dashPlayerRef.current.initialize(videoEl, activeStream, true);
+      }
     } else {
       playerRef.current.src({ src: activeStream, type: streamType });
       const oldTracks = playerRef.current.remoteTextTracks() as unknown as Record<number, unknown> & { length: number };
@@ -183,15 +325,23 @@ export function PlayerModal({
           if (t) playerRef.current.removeRemoteTextTrack(t as never);
         }
       }
-      for (const t of subTracks) {
-        playerRef.current.addRemoteTextTrack(t, false);
+      for (const t of allSubTracks) {
+        const trackEl = playerRef.current.addRemoteTextTrack(t, false) as unknown as { track?: { mode: string } };
+        if (t.default && trackEl?.track) {
+          trackEl.track.mode = 'showing';
+        }
       }
-      playerRef.current.play();
+      playerRef.current.play()?.catch?.(() => {});
     }
-  }, [activeStream, isEmbed, streams]);
+  }, [activeStream, streams, customSubtitles]);
 
   useEffect(() => {
     return () => {
+      if (dashPlayerRef.current) {
+        dashPlayerRef.current.reset();
+        dashPlayerRef.current.destroy();
+        dashPlayerRef.current = null;
+      }
       if (playerRef.current && !playerRef.current.isDisposed()) {
         playerRef.current.dispose();
         playerRef.current = null;
@@ -219,6 +369,7 @@ export function PlayerModal({
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: '8px',
+            marginBottom: '10px',
           }}
         >
           <div
@@ -271,27 +422,30 @@ export function PlayerModal({
               </div>
             )}
 
-            <select
-              className="agSelect"
-              value={proxyLoading ? '__sniffing__' : activeStream}
-              onChange={(e) => {
-                if (e.target.value === '__sniff_proxy__') {
-                  handleBackgroundProxy();
-                } else {
-                  setActiveStream(e.target.value);
-                }
-              }}
-              style={{ fontSize: '9px', padding: '4px 6px', maxWidth: '240px' }}
+            <button
+              type="button"
+              className={customSubtitles.length > 0 ? 'agBtnCyan' : 'agBtnGray'}
+              onClick={() => setShowSubModal(true)}
+              style={{ fontSize: '9px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '3px' }}
+              title="Add manual subtitles (.vtt or .srt)"
             >
-              {filteredStreams.map((s, idx) => (
-                <option key={`${s.quality}-${idx}`} value={s.url}>
-                  {s.quality.toUpperCase()}
-                </option>
-              ))}
-              <option value="__sniff_proxy__" disabled={proxyLoading}>
-                {proxyLoading ? '⚡ SNIFFING IN BG TAB...' : '⚡ SNIFF STREAM (PROXY)'}
-              </option>
-            </select>
+              + SUB {customSubtitles.length > 0 ? `(${customSubtitles.length})` : ''}
+            </button>
+
+            {filteredStreams.length > 0 && (
+              <select
+                className="agSelect"
+                value={activeStream}
+                onChange={(e) => setActiveStream(e.target.value)}
+                style={{ fontSize: '9px', padding: '4px 8px', maxWidth: '120px' }}
+              >
+                {filteredStreams.map((s, idx) => (
+                  <option key={`${s.url}-${idx}`} value={s.url}>
+                    {cleanQualityLabel(s.quality)}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <button
               type="button"
@@ -304,6 +458,7 @@ export function PlayerModal({
           </div>
         </div>
 
+        {/* Video Player Box with Persistent Canvas and Floating Overlays */}
         <div
           style={{
             width: '100%',
@@ -318,29 +473,56 @@ export function PlayerModal({
             overflow: 'hidden',
           }}
         >
-          {loading && !proxyLoading && (
-            <div style={{ color: 'var(--blue)', fontSize: '12px' }}>
-              EXTRACTING VIDEO STREAM...
+          {loading && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 10,
+                color: 'var(--blue)',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                gap: '8px',
+              }}
+            >
+              <div>Loading video stream...</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                EP {episode.number} {episode.title ? `- ${episode.title}` : ''}
+              </div>
             </div>
           )}
 
-          {proxyLoading && (
-            <div style={{ color: 'var(--yellow)', fontSize: '12px' }}>
-              INTERCEPTING STREAM VIA BACKGROUND PROXY...
-            </div>
-          )}
-
-          {error && !proxyLoading && (
-            <div style={{ color: 'var(--red)', fontSize: '11px', textAlign: 'center', padding: '20px' }}>
-              <div>{error}</div>
+          {error && !loading && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 10,
+                color: 'var(--red)',
+                fontSize: '11px',
+                textAlign: 'center',
+                padding: '20px',
+              }}
+            >
+              <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>{error}</div>
               <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
                 <button
                   type="button"
                   className="agBtnYellow"
-                  onClick={handleBackgroundProxy}
+                  onClick={handleRetry}
                   style={{ fontSize: '9px', padding: '6px 12px' }}
                 >
-                  RETRY VIA BACKGROUND PROXY
+                  Retry
                 </button>
                 <a
                   href={episode.url}
@@ -349,36 +531,23 @@ export function PlayerModal({
                   className="agBtnCyan"
                   style={{ fontSize: '9px', padding: '6px 12px' }}
                 >
-                  OPEN ON SOURCE SITE
+                  Open in browser
                 </a>
               </div>
             </div>
           )}
 
-          {!loading && !error && activeStream && (
-            isEmbed ? (
-              <iframe
-                key={activeStream}
-                src={activeStream}
-                allowFullScreen
-                allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
-                style={{ width: '100%', height: '100%', border: 0 }}
-              />
-            ) : (
-              <div data-vjs-player style={{ width: '100%', height: '100%' }}>
-                <video
-                  ref={videoNodeRef}
-                  className="video-js vjs-default-skin vjs-big-play-centered"
-                  playsInline
-                  style={{ width: '100%', height: '100%' }}
-                />
-              </div>
-            )
-          )}
+          <div data-vjs-player style={{ width: '100%', height: '100%' }}>
+            <video
+              ref={videoNodeRef}
+              className="video-js vjs-default-skin vjs-big-play-centered"
+              playsInline
+              style={{ width: '100%', height: '100%' }}
+            />
+          </div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
           <button
             type="button"
             className="agBtnGray"
@@ -403,7 +572,127 @@ export function PlayerModal({
             NEXT EP &gt;
           </button>
         </div>
+
+        {/* Manual Subtitles Popover / Modal */}
+        {showSubModal && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+            }}
+            onClick={() => setShowSubModal(false)}
+          >
+            <div
+              className="agModal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '420px', maxWidth: '90vw', padding: '16px', border: '2px solid var(--blue)' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--blue)' }}>
+                  ADD MANUAL SUBTITLE
+                </span>
+                <button
+                  type="button"
+                  className="agBtnRed"
+                  onClick={() => setShowSubModal(false)}
+                  style={{ fontSize: '8px', padding: '2px 6px' }}
+                >
+                  X
+                </button>
+              </div>
+
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                Upload a local subtitle file (.vtt or .srt) or enter a direct WebVTT / SRT subtitle URL.
+              </div>
+
+              {subStatusMessage && (
+                <div style={{ fontSize: '10px', color: 'var(--yellow)', marginBottom: '10px' }}>
+                  {subStatusMessage}
+                </div>
+              )}
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-light)', display: 'block', marginBottom: '4px' }}>
+                  1. Upload .vtt / .srt file:
+                </label>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".vtt,.srt"
+                  onChange={handleSubtitleFileUpload}
+                  style={{ fontSize: '10px', color: 'var(--text-light)' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-light)', display: 'block', marginBottom: '4px' }}>
+                  2. Or enter Subtitle URL:
+                </label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="text"
+                    className="agInput"
+                    value={subUrlInput}
+                    onChange={(e) => setSubUrlInput(e.target.value)}
+                    placeholder="https://example.com/subtitles.vtt"
+                    style={{ fontSize: '10px', flex: 1, padding: '4px 8px' }}
+                  />
+                  <button
+                    type="button"
+                    className="agBtnCyan"
+                    onClick={handleAddSubtitleUrl}
+                    style={{ fontSize: '9px', padding: '4px 10px' }}
+                  >
+                    Load URL
+                  </button>
+                </div>
+              </div>
+
+              {customSubtitles.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-light)', marginBottom: '4px', fontWeight: 'bold' }}>
+                    Active Custom Subtitles:
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '100px', overflowY: 'auto' }}>
+                    {customSubtitles.map((cs, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          fontSize: '9px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          backgroundColor: 'rgba(255,255,255,0.05)',
+                          padding: '4px 8px',
+                          borderRadius: '2px',
+                        }}
+                      >
+                        <span style={{ color: 'var(--text-light)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cs.label}
+                        </span>
+                        <button
+                          type="button"
+                          className="agBtnRed"
+                          onClick={() => setCustomSubtitles((prev) => prev.filter((_, i) => i !== idx))}
+                          style={{ fontSize: '7px', padding: '2px 4px' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

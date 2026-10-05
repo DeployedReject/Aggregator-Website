@@ -60,6 +60,7 @@ body {
   image-rendering: pixelated;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: unset;
+  zoom: 1.08;
 }
 
 #root {

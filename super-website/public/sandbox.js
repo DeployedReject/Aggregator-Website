@@ -96,6 +96,13 @@ async function runPluginTestSuite(code, targetDomain) {
     totalTests: 6,
     failedTests: [],
     logs: [],
+    runtimeAuditSnapshot: {
+      getHome: null,
+      search: null,
+      getEpisodes: null,
+      getStreams: null,
+      warnings: [],
+    },
   };
 
   function log(type, msg) {
@@ -176,6 +183,11 @@ async function runPluginTestSuite(code, targetDomain) {
           `${contextName} item has invalid or dummy title (${JSON.stringify(item.title)}). If the source returns nested title objects (such as { english, romaji, userPreferred }), extract the string via: item.title?.english || item.title?.romaji || item.title?.userPreferred || item.title?.native || item.name || 'Untitled'. Item: ${JSON.stringify(item)}`
         );
       }
+      if (item.coverUrl && typeof item.coverUrl === "string" && item.coverUrl.startsWith("/")) {
+        report.runtimeAuditSnapshot.warnings.push(
+          `${contextName} item "${item.title}" has a relative coverUrl ("${item.coverUrl}"). Prepend this.baseUrl to make it absolute.`
+        );
+      }
     }
 
     if (plugin && typeof plugin.getHome === "function") {
@@ -192,6 +204,7 @@ async function runPluginTestSuite(code, targetDomain) {
           validateMediaItem(items[i], `getHome()[${i}]`);
         }
         sampleMediaItem = items[0];
+        report.runtimeAuditSnapshot.getHome = items.slice(0, 3);
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 3/6: getHome() PASSED (${items.length} valid items returned).`);
       } catch (err) {
@@ -220,6 +233,7 @@ async function runPluginTestSuite(code, targetDomain) {
           validateMediaItem(results[i], `search()[${i}]`);
         }
         if (!sampleMediaItem) sampleMediaItem = results[0];
+        report.runtimeAuditSnapshot.search = results.slice(0, 3);
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 4/6: search('One Piece') PASSED (${results.length} valid items returned).`);
       } catch (err) {
@@ -260,7 +274,16 @@ async function runPluginTestSuite(code, targetDomain) {
             throw new Error(`Episode at index ${i} has invalid title string: ${JSON.stringify(ep.title)}`);
           }
         }
+        if (episodes.length === 1 && !targetDomain.includes("movie")) {
+          report.runtimeAuditSnapshot.warnings.push(
+            `getEpisodes("${mediaIdToTest}") only returned 1 single episode. If this is a TV series, verify whether episodes are paginated or in a list container.`
+          );
+        }
         sampleEpisodeItem = episodes[0];
+        report.runtimeAuditSnapshot.getEpisodes = {
+          count: episodes.length,
+          sample: episodes.slice(0, 3),
+        };
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
       } catch (err) {
@@ -317,6 +340,7 @@ async function runPluginTestSuite(code, targetDomain) {
             }
           }
         }
+        report.runtimeAuditSnapshot.getStreams = streams.slice(0, 2);
         report.passedCount++;
         log("resp", `\x1b[32m✓\x1b[0m Test 6/6: getStreams() PASSED (${streams.length} stream sources returned).`);
       } catch (err) {

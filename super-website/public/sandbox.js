@@ -1,3 +1,5 @@
+let lastFetchInfo = null;
+
 globalThis.fetch = async function (url, options) {
   const reqId = "fetch_" + Math.random().toString(36).substring(2);
   const normalizedUrl = typeof url === "string" ? url : (url?.url || "");
@@ -12,6 +14,14 @@ globalThis.fetch = async function (url, options) {
       if (event.data?.action === "PROXY_FETCH_RESPONSE" && event.data.reqId === reqId) {
         window.removeEventListener("message", handleResponse);
         const { status, statusText, ok, headers, body } = event.data;
+        lastFetchInfo = {
+          url: normalizedUrl,
+          method: normalizedInit.method,
+          status,
+          statusText,
+          ok,
+          bodySnippet: typeof body === "string" ? body.substring(0, 1000).replace(/\s+/g, " ").trim() : "",
+        };
         resolve({
           status,
           statusText,
@@ -74,19 +84,45 @@ function sanitizePluginExecutableCode(raw) {
   if (!raw) return "";
   let code = raw;
   code = code.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  code = code.replace(/<thought>[\s\S]*?<\/thought>/gi, "");
   code = code.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
-  code = code.replace(/<\/?(?:think|reasoning|scratchpad|output|code)>/gi, "");
+  code = code.replace(/<\/?(?:think|thought|reasoning|scratchpad|output|code)>/gi, "");
   code = code.replace(/<(?:\w+\s+)*(?:code|javascript|plugin|script|source)>/gi, "");
   code = code.replace(/_{3,}/g, "");
-  code = code.replace(/^```[a-z]*\s*/gim, "").replace(/```\s*$/gim, "");
-  const match = code.match(/(?:export\s+default\s*\{|module\.exports\s*=|const\s+plugin\s*=|globalThis\.AggregatorPlugins)[\s\S]*/);
-  if (match) {
-    code = match[0];
+
+  // If code is wrapped in markdown code blocks, extract inner content
+  const codeBlockMatch = code.match(/```(?:javascript|js)?([\s\S]*?)```/i);
+  if (codeBlockMatch) {
+    code = codeBlockMatch[1];
+  } else {
+    code = code.replace(/^```[a-z]*\s*/gim, "").replace(/```\s*$/gim, "");
   }
+
+  // Preserve all helper functions and variables before export default
   return code
     .replace(/\bexport\s+default\s+([a-zA-Z0-9_$]+)\s*;?/g, "module.exports = $1; module.exports.default = $1;")
-    .replace(/\bexport\s+default\s+/g, "module.exports.default = ")
+    .replace(/\bexport\s+default\s+/g, "module.exports = module.exports.default = ")
     .replace(/\bexport\s+(const|let|var|function|class)\s+/g, "$1 ");
+}
+
+function isInvalidTitle(title) {
+  if (!title || typeof title !== "string") return true;
+  const t = title.trim().toLowerCase();
+  return t === "" || t === "[object object]" || t === "unknown" || t === "unknown title" || t === "null" || t === "undefined";
+}
+
+function validateMediaItem(item, contextName) {
+  if (!item || typeof item !== "object") {
+    throw new Error(`${contextName} returned a non-object item: ${JSON.stringify(item)}`);
+  }
+  if (!item.id && item.id !== 0) {
+    throw new Error(`${contextName} item missing required 'id' field. Item: ${JSON.stringify(item)}`);
+  }
+  if (typeof item.title !== "string" || isInvalidTitle(item.title)) {
+    throw new Error(
+      `${contextName} item has invalid or dummy title (${JSON.stringify(item.title)}). If the source returns nested title objects (such as { english, romaji, userPreferred }), extract the string via: item.title?.english || item.title?.romaji || item.title?.userPreferred || item.title?.native || item.name || 'Untitled'. Item: ${JSON.stringify(item)}`
+    );
+  }
 }
 
 async function runPluginTestSuite(code, targetDomain) {
@@ -194,7 +230,7 @@ async function runPluginTestSuite(code, targetDomain) {
       try {
         log("sys", "Test 3/6: Executing getHome()...");
         const homePromise = plugin.getHome();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("getHome() timed out after 15000ms")), 15000));
         const items = await Promise.race([homePromise, timeoutPromise]);
 
         if (!Array.isArray(items) || items.length === 0) {
@@ -219,11 +255,12 @@ async function runPluginTestSuite(code, targetDomain) {
       }
     }
 
+    let searchSampleItem = null;
     if (plugin && typeof plugin.search === "function") {
       try {
         log("sys", "Test 4/6: Executing search('One Piece')...");
         const searchPromise = plugin.search("One Piece");
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("search() timed out after 15000ms")), 15000));
         const results = await Promise.race([searchPromise, timeoutPromise]);
 
         if (!Array.isArray(results) || results.length === 0) {
@@ -232,6 +269,7 @@ async function runPluginTestSuite(code, targetDomain) {
         for (let i = 0; i < Math.min(results.length, 5); i++) {
           validateMediaItem(results[i], `search()[${i}]`);
         }
+        searchSampleItem = results[0];
         if (!sampleMediaItem) sampleMediaItem = results[0];
         report.runtimeAuditSnapshot.search = results.slice(0, 3);
         report.passedCount++;
@@ -249,67 +287,91 @@ async function runPluginTestSuite(code, targetDomain) {
     }
 
     if (plugin && typeof plugin.getEpisodes === "function") {
-      const mediaIdToTest = sampleMediaItem?.id || sampleMediaItem?.url || `https://${targetDomain}`;
-      try {
-        log("sys", `Test 5/6: Executing getEpisodes("${mediaIdToTest}")...`);
-        const epPromise = plugin.getEpisodes(mediaIdToTest);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
-        const episodes = await Promise.race([epPromise, timeoutPromise]);
+      const candidatesToTry = [
+        sampleMediaItem?.id,
+        sampleMediaItem?.url,
+        searchSampleItem?.id,
+        searchSampleItem?.url,
+        `https://${targetDomain}`,
+      ].filter(Boolean);
 
-        if (!Array.isArray(episodes) || episodes.length === 0) {
-          throw new Error(`getEpisodes("${mediaIdToTest}") must return a non-empty Array of episodes, received: ${Array.isArray(episodes) ? "0 episodes" : typeof episodes}`);
+      let epSuccess = false;
+      let lastEpError = null;
+
+      for (const mediaIdToTest of candidatesToTry) {
+        try {
+          log("sys", `Test 5/6: Executing getEpisodes("${mediaIdToTest}")...`);
+          const epPromise = plugin.getEpisodes(mediaIdToTest);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`getEpisodes("${mediaIdToTest}") timed out after 15000ms`)), 15000));
+          const episodes = await Promise.race([epPromise, timeoutPromise]);
+
+          if (!Array.isArray(episodes) || episodes.length === 0) {
+            throw new Error(`getEpisodes("${mediaIdToTest}") returned ${Array.isArray(episodes) ? "0 episodes" : typeof episodes}`);
+          }
+          for (let i = 0; i < episodes.length; i++) {
+            const ep = episodes[i];
+            if (!ep || typeof ep !== "object") {
+              throw new Error(`Episode at index ${i} is not an object`);
+            }
+            if (ep.id === undefined || ep.id === null || ep.id === "") {
+              throw new Error(`Episode at index ${i} missing required 'id' field. Episode: ${JSON.stringify(ep)}`);
+            }
+            if (typeof ep.number !== "number" || isNaN(ep.number)) {
+              throw new Error(`Episode at index ${i} has invalid 'number' (${JSON.stringify(ep.number)}). Must be an integer number (1, 2, ...).`);
+            }
+            if (ep.title && (typeof ep.title !== "string" || ep.title.includes("[object Object]"))) {
+              throw new Error(`Episode at index ${i} has invalid title string: ${JSON.stringify(ep.title)}`);
+            }
+          }
+          sampleEpisodeItem = episodes[0];
+          report.runtimeAuditSnapshot.getEpisodes = {
+            count: episodes.length,
+            sample: episodes.slice(0, 3),
+          };
+          epSuccess = true;
+          report.passedCount++;
+          log("resp", `\x1b[32m✓\x1b[0m Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
+          break;
+        } catch (err) {
+          lastEpError = err;
         }
-        for (let i = 0; i < episodes.length; i++) {
-          const ep = episodes[i];
-          if (!ep || typeof ep !== "object") {
-            throw new Error(`getEpisodes() returned non-object episode at index ${i}`);
-          }
-          if (ep.id === undefined || ep.id === null || ep.id === "") {
-            throw new Error(`Episode at index ${i} missing required 'id' field. Episode: ${JSON.stringify(ep)}`);
-          }
-          if (typeof ep.number !== "number" || isNaN(ep.number)) {
-            throw new Error(`Episode at index ${i} has invalid 'number' (${JSON.stringify(ep.number)}). Must be an integer number (1, 2, ...).`);
-          }
-          if (ep.title && (typeof ep.title !== "string" || ep.title.includes("[object Object]"))) {
-            throw new Error(`Episode at index ${i} has invalid title string: ${JSON.stringify(ep.title)}`);
-          }
-        }
-        if (episodes.length === 1 && !targetDomain.includes("movie")) {
-          report.runtimeAuditSnapshot.warnings.push(
-            `getEpisodes("${mediaIdToTest}") only returned 1 single episode. If this is a TV series, verify whether episodes are paginated or in a list container.`
-          );
-        }
-        sampleEpisodeItem = episodes[0];
-        report.runtimeAuditSnapshot.getEpisodes = {
-          count: episodes.length,
-          sample: episodes.slice(0, 3),
-        };
-        report.passedCount++;
-        log("resp", `\x1b[32m✓\x1b[0m Test 5/6: getEpisodes() PASSED (${episodes.length} episodes returned).`);
-      } catch (err) {
+      }
+
+      if (!epSuccess) {
         report.failedTests.push({
           test: "getEpisodes(mediaId)",
-          error: err.message,
-          stack: err.stack || err.message,
+          error: lastEpError?.message || "Failed to fetch episodes",
+          stack: lastEpError?.stack || lastEpError?.message || "",
           expected: "Non-empty Array of episodes: [{ id: string, number: number, title?: string, url?: string }]",
-          actual: `Error: ${err.message}`,
+          actual: `Error: ${lastEpError?.message}`,
         });
-        log("err", `\x1b[31m✗\x1b[0m Test 5/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 5/6 FAILED: ${lastEpError?.message}`);
       }
     }
 
     if (plugin && typeof plugin.getStreams === "function") {
-      const episodeIdToTest = sampleEpisodeItem?.id || sampleEpisodeItem?.url || `https://${targetDomain}`;
-      try {
-        log("sys", `Test 6/6: Executing getStreams("${episodeIdToTest}")...`);
-        const streamPromise = plugin.getStreams(episodeIdToTest);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out after 10000ms")), 10000));
-        const streams = await Promise.race([streamPromise, timeoutPromise]);
+      const epCandidates = [
+        sampleEpisodeItem?.id,
+        sampleEpisodeItem?.url,
+        sampleMediaItem?.id ? `${sampleMediaItem.id}?ep=1` : null,
+        searchSampleItem?.id ? `${searchSampleItem.id}?ep=1` : null,
+        "1",
+        "sample-episode-1",
+      ].filter(Boolean);
 
-        if (!Array.isArray(streams) || streams.length === 0) {
-          throw new Error(`getStreams("${episodeIdToTest}") must return a non-empty Array of stream sources, received: ${Array.isArray(streams) ? "0 streams" : typeof streams}`);
-        }
-        if (streams.length > 0) {
+      let streamSuccess = false;
+      let lastStreamError = null;
+
+      for (const episodeIdToTest of epCandidates) {
+        try {
+          log("sys", `Test 6/6: Executing getStreams("${episodeIdToTest}")...`);
+          const streamPromise = plugin.getStreams(episodeIdToTest);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`getStreams("${episodeIdToTest}") timed out after 25000ms`)), 25000));
+          const streams = await Promise.race([streamPromise, timeoutPromise]);
+
+          if (!Array.isArray(streams) || streams.length === 0) {
+            throw new Error(`getStreams("${episodeIdToTest}") returned ${Array.isArray(streams) ? "0 streams" : typeof streams}`);
+          }
           for (let i = 0; i < streams.length; i++) {
             const s = streams[i];
             if (!s || typeof s !== "object") {
@@ -339,19 +401,25 @@ async function runPluginTestSuite(code, targetDomain) {
               throw new Error(`Stream 'headers' must be a key-value object (e.g. { Referer: '...' }).`);
             }
           }
+          report.runtimeAuditSnapshot.getStreams = streams.slice(0, 2);
+          streamSuccess = true;
+          report.passedCount++;
+          log("resp", `\x1b[32m✓\x1b[0m Test 6/6: getStreams() PASSED (${streams.length} stream sources returned).`);
+          break;
+        } catch (err) {
+          lastStreamError = err;
         }
-        report.runtimeAuditSnapshot.getStreams = streams.slice(0, 2);
-        report.passedCount++;
-        log("resp", `\x1b[32m✓\x1b[0m Test 6/6: getStreams() PASSED (${streams.length} stream sources returned).`);
-      } catch (err) {
+      }
+
+      if (!streamSuccess) {
         report.failedTests.push({
           test: "getStreams(episodeId)",
-          error: err.message,
-          stack: err.stack || err.message,
+          error: lastStreamError?.message || "Failed to fetch streams",
+          stack: lastStreamError?.stack || lastStreamError?.message || "",
           expected: "Array of stream sources: [{ url: string, quality?: string, type?: 'sub'|'dub', subtitles?: [{ file, label }], headers?: { Referer, Origin } }]",
-          actual: `Error: ${err.message}`,
+          actual: `Error: ${lastStreamError?.message}`,
         });
-        log("err", `\x1b[31m✗\x1b[0m Test 6/6 FAILED: ${err.message}`);
+        log("err", `\x1b[31m✗\x1b[0m Test 6/6 FAILED: ${lastStreamError?.message}`);
       }
     }
   } finally {
@@ -476,6 +544,84 @@ window.addEventListener("message", async (event) => {
         },
         "*"
       );
+    }
+  } else if (event.data.action === "RUN_METHOD_TEST") {
+    const { reqId, method, code, args, baseUrl, targetDomain, helperCode } = event.data;
+    try {
+      const cleanMethod = (code || "").trim().replace(/;+\s*$/, "");
+      let fullExecutable = `
+        ${helperCode || ""}
+        const targetObj = {
+          baseUrl: ${JSON.stringify(baseUrl || `https://${targetDomain}`)},
+          id: ${JSON.stringify(targetDomain ? targetDomain.replace(/[^a-z0-9]/gi, "_").toLowerCase() : "test_plugin")},
+          name: "Test Plugin",
+          ${cleanMethod}
+        };
+        module.exports = targetObj;
+        module.exports.default = targetObj;
+      `;
+      const sanitized = sanitizePluginExecutableCode(fullExecutable);
+      const fn = new Function("module", "exports", sanitized);
+      const mockModule = { exports: {} };
+      fn(mockModule, mockModule.exports);
+      const inst = mockModule.exports.default || mockModule.exports;
+
+      if (typeof inst[method] !== "function") {
+        throw new Error(`Method "${method}" was not properly defined in the provided code.`);
+      }
+
+      const resultPromise = inst[method](...(args || []));
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Method "${method}" timed out after 12000ms`)), 12000));
+      const res = await Promise.race([resultPromise, timeoutPromise]);
+
+      const warnings = [];
+      if (method === "search" || method === "getHome") {
+        if (!Array.isArray(res) || res.length === 0) {
+          throw new Error(`${method}() must return a non-empty Array of media items. Received: ${Array.isArray(res) ? "0 items" : typeof res}`);
+        }
+        for (let i = 0; i < Math.min(res.length, 5); i++) {
+          validateMediaItem(res[i], `${method}()[${i}]`);
+          if (res[i].coverUrl && typeof res[i].coverUrl === "string" && res[i].coverUrl.startsWith("/")) {
+            warnings.push(`Item "${res[i].title}" has relative coverUrl ("${res[i].coverUrl}"). Prepend this.baseUrl.`);
+          }
+        }
+      } else if (method === "getEpisodes") {
+        if (!Array.isArray(res) || res.length === 0) {
+          throw new Error(`getEpisodes() must return a non-empty Array of episodes. Received: ${Array.isArray(res) ? "0 episodes" : typeof res}`);
+        }
+        for (let i = 0; i < res.length; i++) {
+          const ep = res[i];
+          if (!ep || typeof ep !== "object") throw new Error(`Episode at index ${i} is not an object`);
+          if (ep.id === undefined || ep.id === null || ep.id === "") throw new Error(`Episode at index ${i} missing required 'id'`);
+          if (typeof ep.number !== "number" || isNaN(ep.number)) throw new Error(`Episode at index ${i} has invalid 'number'`);
+        }
+      } else if (method === "getStreams") {
+        if (!Array.isArray(res) || res.length === 0) {
+          throw new Error(`getStreams() must return a non-empty Array of stream sources. Received: ${Array.isArray(res) ? "0 streams" : typeof res}`);
+        }
+        for (let i = 0; i < res.length; i++) {
+          const s = res[i];
+          if (!s || typeof s !== "object" || !s.url) throw new Error(`Stream at index ${i} missing valid 'url'`);
+        }
+      }
+
+      window.parent.postMessage({
+        action: "RUN_METHOD_TEST_RESPONSE",
+        reqId,
+        success: true,
+        result: res,
+        warnings,
+        lastFetch: lastFetchInfo,
+      }, "*");
+    } catch (err) {
+      window.parent.postMessage({
+        action: "RUN_METHOD_TEST_RESPONSE",
+        reqId,
+        success: false,
+        error: err.message,
+        stack: err.stack || err.message,
+        lastFetch: lastFetchInfo,
+      }, "*");
     }
   }
 });

@@ -407,16 +407,6 @@ export async function loadPlugins(): Promise<SourcePlugin[]> {
     }
   } catch (e) {}
 
-  if (installed['www_customplugin_xyz']) {
-    const old = installed['www_customplugin_xyz'];
-    delete installed['www_customplugin_xyz'];
-    installed['customplugin'] = {
-      ...old,
-      id: 'customplugin',
-      name: 'CustomPlugin',
-      code: (old.code || '').replace(/["']www_customplugin_xyz["']/g, '"customplugin"').replace(/["']WWW Provider["']/g, '"CustomPlugin"'),
-    };
-  }
 
   for (const id in installed) {
     if (uninstalled.has(id)) continue;

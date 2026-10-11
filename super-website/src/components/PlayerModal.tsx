@@ -24,8 +24,7 @@ function isDirectStream(s: StreamSource): boolean {
   const u = s.url.toLowerCase();
   const q = (s.quality || '').toLowerCase();
   if (q.includes('(embed)') || q.includes('[player embed]')) return false;
-  if (u.includes('embed.php') || u.includes('/player/?') || u.includes('/embed/')) return false;
-  if (u.includes('.m3u8') || u.includes('.mpd') || u.includes('.mp4') || u.includes('.webm') || u.includes('example.com') || u.includes('example.com')) return true;
+  if (u.includes('.m3u8') || u.includes('.mpd') || u.includes('.mp4') || u.includes('.webm') || u.includes('.ogv')) return true;
   return false;
 }
 
@@ -239,8 +238,8 @@ export function PlayerModal({
   useEffect(() => {
     if (!videoNodeRef.current || !activeStream) return;
 
-    const isDash = activeStream.includes('.mpd') || activeStream.includes('example.com');
-    const isHls = activeStream.includes('.m3u8') || activeStream.includes('example.com');
+    const isDash = activeStream.includes('.mpd');
+    const isHls = activeStream.includes('.m3u8');
     const isWebm = activeStream.includes('.webm');
     const streamType = isHls ? 'application/x-mpegURL' : isDash ? 'application/dash+xml' : isWebm ? 'video/webm' : 'video/mp4';
 

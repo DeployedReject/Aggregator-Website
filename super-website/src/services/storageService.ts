@@ -107,3 +107,13 @@ export async function loadActiveSourceId(): Promise<string | null> {
 export async function saveActiveSourceId(id: string): Promise<void> {
   await setItem(SRC_KEY, id);
 }
+
+const SRC_FILTER_KEY = 'aggregator_source_filter';
+
+export async function loadSourceFilter(): Promise<Record<string, 'include' | 'exclude'>> {
+  return getItem<Record<string, 'include' | 'exclude'>>(SRC_FILTER_KEY, {});
+}
+
+export async function saveSourceFilter(filter: Record<string, 'include' | 'exclude'>): Promise<void> {
+  await setItem(SRC_FILTER_KEY, filter);
+}

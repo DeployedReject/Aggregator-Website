@@ -30,3 +30,6 @@ export interface SourcePlugin {
   getStreams(episodeId: string): Promise<StreamSource[]>;
   getHome?(): Promise<MediaItem[]>;
 }
+
+export type SourceFilterMode = 'include' | 'exclude';
+export type SourceFilterState = Record<string, SourceFilterMode>;

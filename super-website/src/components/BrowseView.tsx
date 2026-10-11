@@ -5,7 +5,7 @@ import { fetchTrendingAnime, type AniListTrendingItem } from '../services/anilis
 
 interface Props {
   plugins: SourcePlugin[];
-  activePluginId: string;
+  activePlugins: SourcePlugin[];
   library: LibraryItem[];
   onSelectMedia: (item: MediaItem, plugin: SourcePlugin) => void;
   onOpenLibraryItem: (item: LibraryItem) => void;
@@ -19,7 +19,7 @@ interface SourceResultGroup {
 
 export function BrowseView({
   plugins,
-  activePluginId,
+  activePlugins,
   library,
   onSelectMedia,
   onOpenLibraryItem,
@@ -90,9 +90,7 @@ export function BrowseView({
     setIsSearching(true);
     setHasSearched(true);
 
-    const targetPlugins = activePluginId && activePluginId !== 'all'
-      ? plugins.filter((p) => p.id === activePluginId)
-      : plugins;
+    const targetPlugins = activePlugins;
 
     const promises = targetPlugins.map(async (plugin) => {
       try {
@@ -129,9 +127,20 @@ export function BrowseView({
   }
 
   const totalResults = searchResults.reduce((acc, g) => acc + g.items.length, 0);
-  const targetPlugins = activePluginId && activePluginId !== 'all'
-    ? plugins.filter((p) => p.id === activePluginId)
-    : plugins;
+
+  // Filter home items according to active/selected sources
+  const activeHomeItems = pluginHomeItems.filter((group) =>
+    activePlugins.some((p) => p.id === group.plugin.id)
+  );
+
+  const searchPlaceholder =
+    activePlugins.length === 0
+      ? 'No active sources (customize in menu)...'
+      : activePlugins.length === 1
+        ? `Search ${activePlugins[0].name}...`
+        : activePlugins.length < plugins.length
+          ? `Search ${activePlugins.length} active sources...`
+          : 'Search all sources...';
 
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
@@ -148,12 +157,12 @@ export function BrowseView({
         <input
           type="text"
           className="agInput"
-          placeholder="Search all sources..."
+          placeholder={searchPlaceholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ width: '340px', maxWidth: '100%' }}
         />
-        <button type="submit" className="agBtnBlue" disabled={isSearching}>
+        <button type="submit" className="agBtnBlue" disabled={isSearching || activePlugins.length === 0}>
           {isSearching ? 'SEARCHING...' : 'SEARCH'}
         </button>
         {hasSearched && (
@@ -170,7 +179,9 @@ export function BrowseView({
 
       {isSearching && (
         <div style={{ textAlign: 'center', padding: '40px 0', fontSize: '12px', color: 'var(--blue)' }}>
-          Searching all sources...
+          {activePlugins.length === 1
+            ? `Searching ${activePlugins[0].name}...`
+            : `Searching ${activePlugins.length} active source(s)...`}
         </div>
       )}
 
@@ -178,9 +189,9 @@ export function BrowseView({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
           {totalResults === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 0', fontSize: '11px', color: 'var(--text-muted)' }}>
-              {targetPlugins.length === 0
-                ? 'NO SOURCES INSTALLED. OPEN THE EXTENSION MENU TO INSTALL SOURCES.'
-                : `NO RESULTS FOUND ACROSS ${searchResults.length} SOURCE(S).`}
+              {activePlugins.length === 0
+                ? 'NO SOURCES ACTIVE. CUSTOMIZE SOURCES IN THE NAV MENU.'
+                : `NO RESULTS FOUND ACROSS ${searchResults.length} ACTIVE SOURCE(S).`}
             </div>
           ) : (
             searchResults.map((group) => {
@@ -268,7 +279,15 @@ export function BrowseView({
 
       {!hasSearched && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {pluginHomeItems.map((group) => (
+          {activeHomeItems.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '30px 0', fontSize: '11px', color: 'var(--text-muted)' }}>
+              {activePlugins.length === 0
+                ? 'ALL SOURCES ARE CURRENTLY EXCLUDED. CLICK "SOURCES" IN THE TOP BAR TO SELECT SOURCES.'
+                : 'NO HOME FEED ITEMS AVAILABLE FOR SELECTED SOURCES.'}
+            </div>
+          )}
+
+          {activeHomeItems.map((group) => (
             <section key={group.plugin.id} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div
                 style={{

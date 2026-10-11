@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import type { SourcePlugin, MediaItem, EpisodeItem } from './types/plugin';
+import { useState, useEffect, useMemo } from 'react';
+import type { SourcePlugin, MediaItem, EpisodeItem, SourceFilterState } from './types/plugin';
 import type { LibraryItem, DownloadItem } from './types/library';
 import { loadPlugins, getPluginById, subscribePluginChanges } from './services/pluginRegistry';
 import {
@@ -10,7 +10,8 @@ import {
   loadCategories,
   addCategory,
   loadActiveSourceId,
-  saveActiveSourceId,
+  loadSourceFilter,
+  saveSourceFilter,
 } from './services/storageService';
 import {
   subscribeDownloads,
@@ -26,7 +27,7 @@ import { PlayerModal } from './components/PlayerModal';
 
 export default function App() {
   const [plugins, setPlugins] = useState<SourcePlugin[]>([]);
-  const [activePluginId, setActivePluginId] = useState<string>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilterState>({});
   const [activeTab, setActiveTab] = useState<'browse' | 'library' | 'downloads'>('browse');
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -46,11 +47,14 @@ export default function App() {
       const all = await loadPlugins();
       setPlugins(all);
 
-      const savedSource = await loadActiveSourceId();
-      if (savedSource && (savedSource === 'all' || all.some((p) => p.id === savedSource))) {
-        setActivePluginId(savedSource);
-      } else {
-        setActivePluginId('all');
+      const [savedFilter, savedSource] = await Promise.all([
+        loadSourceFilter(),
+        loadActiveSourceId(),
+      ]);
+      if (savedFilter && Object.keys(savedFilter).length > 0) {
+        setSourceFilter(savedFilter);
+      } else if (savedSource && savedSource !== 'all') {
+        setSourceFilter({ [savedSource]: 'include' });
       }
 
       const [lib, cats] = await Promise.all([loadLibrary(), loadCategories()]);
@@ -76,10 +80,41 @@ export default function App() {
     };
   }, []);
 
-  async function handlePluginChange(id: string) {
-    setActivePluginId(id);
-    await saveActiveSourceId(id);
+  async function handleToggleSourceFilter(id: string) {
+    const current = sourceFilter[id];
+    let next: 'include' | 'exclude' | undefined = undefined;
+    if (!current) {
+      next = 'include'; // 1st click: selects / includes
+    } else if (current === 'include') {
+      next = 'exclude'; // 2nd click: excludes
+    } else {
+      next = undefined; // 3rd click: deselects / neutral
+    }
+
+    const updated: SourceFilterState = { ...sourceFilter };
+    if (next) {
+      updated[id] = next;
+    } else {
+      delete updated[id];
+    }
+    setSourceFilter(updated);
+    await saveSourceFilter(updated);
   }
+
+  async function handleResetSourceFilter() {
+    setSourceFilter({});
+    await saveSourceFilter({});
+  }
+
+  const effectivePlugins = useMemo(() => {
+    const includes = plugins.filter((p) => sourceFilter[p.id] === 'include');
+    const excludes = new Set(plugins.filter((p) => sourceFilter[p.id] === 'exclude').map((p) => p.id));
+
+    if (includes.length > 0) {
+      return includes.filter((p) => !excludes.has(p.id));
+    }
+    return plugins.filter((p) => !excludes.has(p.id));
+  }, [plugins, sourceFilter]);
 
   async function handleAddToLibrary(media: MediaItem, category: string, pluginId: string) {
     const item: LibraryItem = {
@@ -157,8 +192,9 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         plugins={plugins}
-        activePluginId={activePluginId}
-        onPluginChange={handlePluginChange}
+        sourceFilter={sourceFilter}
+        onToggleSourceFilter={handleToggleSourceFilter}
+        onResetSourceFilter={handleResetSourceFilter}
         downloadCount={downloads.filter((d) => d.status === 'downloading').length}
       />
 
@@ -189,7 +225,7 @@ export default function App() {
         {activeTab === 'browse' && (
           <BrowseView
             plugins={plugins}
-            activePluginId={activePluginId}
+            activePlugins={effectivePlugins}
             library={library}
             onSelectMedia={(media, plugin) => setSelectedMediaState({ media, plugin })}
             onOpenLibraryItem={handleOpenLibraryItem}
